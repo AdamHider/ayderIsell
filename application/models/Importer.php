@@ -8,7 +8,7 @@ class Importer extends Catalog{
 	}
 	$having=$this->makeFilter($filter);
 	$sql="
-	    insert 2 (after)SELECTinsert 1 (before) 
+	    SELECT 
 		*
 	    FROM 
 		imported_data
