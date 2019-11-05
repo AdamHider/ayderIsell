@@ -13,6 +13,7 @@ class MobiSell extends PluginManager {
     function __construct() {
         ini_set('zlib.output_compression_level', 6);
         ob_start("ob_gzhandler");
+        session_write_close();
         parent::__construct();
     }
 
@@ -207,98 +208,8 @@ class MobiSell extends PluginManager {
         $Company->selectPassiveCompany($passive_company_id);
         return $Company->companyPrefsGet();
     }
-    
-    //-----------PRODUCT LIST FETCHING---------------//
-    
-    public $productListFetch = ['q' => 'string', 'offset' => ['int', 0], 'limit' => ['int', 10],  'category_id' => ['int', 0], 'pcomp_id' => ['int', 0], 'order_by' => 'string','attribute_value_ids' => 'json'];
-    public function productListFetch($q, $offset, $limit, $category_id, $pcomp_id, $order_by, $attribute_value_ids) {
-	$price_query="0";
-        $usd_ratio=$this->Hub->pref('usd_ratio');
-	$where="1";
-        if( strlen($q)==13 && is_numeric($q) ){
-	    $where="product_barcode=$q";
-	} else if( $q ){
-	    $cases=[];
-	    $clues=  explode(' ', $q);
-	    foreach ($clues as $clue) {
-		if ($clue == ''){
-		    continue;
-		}
-		$cases[]="(product_code LIKE '%$clue%' OR ru LIKE '%$clue%')";
-	    }
-	    if( count($cases)>0 ){
-		$where=implode(' AND ',$cases);
-	    }
-	}
-        if( $category_id ){
-            $branch_ids = $this->treeGetSub('stock_tree', $category_id);
-            $where .= " AND parent_id IN (" . implode(',', $branch_ids) . ")";
-        } 
-        $this->productListCreateTemporary($where);
-        $attribute_list = $this->attributeListFetch($attribute_value_ids,$where);
-        $where="1";
-        if( $attribute_value_ids ){
-             foreach($attribute_value_ids as $index=>$attribute_value){
-                 $where .= " AND attribute_value_hash LIKE '%$attribute_value%' ";
-             }
-        }
-	 $sql="
-	   SELECT 
-                t.product_id,
-                t.product_code,
-                t.product_spack,
-                t.leftover,
-                t.product_name,
-                t.product_img,
-                t.fetch_count,
-                t.fetch_stamp,
-                t.parent_id,
-                t.product_unit,
-                GET_SELL_PRICE(t.product_code, {$pcomp_id}, {$usd_ratio}) product_price_total,
-                GET_PRICE(t.product_code,{$pcomp_id}, {$usd_ratio}) product_price_total_raw
-            FROM
-                (SELECT 
-                *, ru product_name
-	    FROM
-		product_list_temp
-            WHERE $where
-            GROUP BY product_id
-	    ORDER BY $order_by, product_code
-	    LIMIT $limit OFFSET $offset ) t
-            ";  
-        $product_list = $this->get_list($sql);
-        return ['product_list'=> $product_list, 'attribute_list'=> $attribute_list];
-    }
-    
-    private function productListCreateTemporary($where){
-         $sql="
-            CREATE TEMPORARY TABLE product_list_temp
-            SELECT
-                pl.product_id,
-                se.product_code,
-                pl.ru,
-                product_spack,
-                product_quantity leftover,
-                product_img,
-                fetch_count,
-                fetch_stamp,
-                parent_id,
-                product_unit,
-                self_price
-                ,GROUP_CONCAT(DISTINCT av.attribute_value_hash SEPARATOR ',') attribute_value_hash
-            FROM
-                stock_entries se
-                    JOIN
-                prod_list pl USING(product_code)
-                    LEFT JOIN	
-                attribute_values av ON pl.product_id = av.product_id
-                    LEFT JOIN
-                attribute_list al USING(attribute_id)
-                WHERE $where
-                GROUP BY pl.product_id
-        ";
-        return $this->query($sql);
-    }
+
+
     
     private function attributeListFetch($attribute_value_ids, $where){
         $this->query("CREATE TEMPORARY TABLE attributes_temp SELECT av.*, pl.parent_id FROM attribute_values av JOIN product_list_temp pl ON av.product_id = pl.product_id AND $where");
@@ -354,8 +265,8 @@ class MobiSell extends PluginManager {
                 $attribute_value_exploded = explode('::', $attribute_value);
                 $attribute_value = [
                     'attribute_value' => $attribute_value_exploded[0],
-                    'attribute_value_id' => $attribute_value_exploded[1],
-                    'product_total' => $attribute_value_exploded[2]*1,
+                    'attribute_value_id' => isset($attribute_value_exploded[1])?$attribute_value_exploded[1]:'',
+                    'product_total' => isset($attribute_value_exploded[2])?$attribute_value_exploded[2]*1:0,
                     'attribute_id' => $attribute->attribute_id,
                     'attribute_unit' => $attribute->attribute_unit,
                     'attribute_name' => $attribute->attribute_name,
@@ -365,38 +276,39 @@ class MobiSell extends PluginManager {
         }
         return $attribute_list;
     }
-    
-    public $productGet = ['product_code' => 'string'];
-    public function productGet($product_code) {
+    /*
+    //public $productGet = ['product_code' => 'string'];
+    public function productGet(string $product_code) {
         $pcomp_id=$this->Hub->pcomp('company_id');
         $usd_ratio=$this->Hub->pref('usd_ratio');
-          $sql = "SELECT
-		    st.label parent_label,
-		    pl.*,
-		    ROUND(product_volume,5) product_volume,
-		    ROUND(product_weight,5) product_weight,
-		    product_quantity leftover,
-                    product_img,
-                    product_unit,
-                    GET_SELL_PRICE(se.product_code,'{$pcomp_id}','{$usd_ratio}') product_price_total,
-                    GET_PRICE(se.product_code,'{$pcomp_id}','{$usd_ratio}') product_price_total_raw,
-		    pp.curr_code,
-		    se.party_label,
-		    se.product_quantity,
-		    se.product_img
-		FROM
-		    stock_entries se
-			JOIN
-		    prod_list pl ON pl.product_code=se.product_code
-			LEFT JOIN
-		    price_list pp ON pp.product_code=se.product_code AND pp.label=''
-			LEFT JOIN
-		    stock_tree st ON se.parent_id=branch_id
-		WHERE 
-		    se.product_code='{$product_code}'";
+        $sql = "SELECT
+                  st.label parent_label,
+                  pl.*,
+                  ROUND(product_volume,5) product_volume,
+                  ROUND(product_weight,5) product_weight,
+                  product_quantity leftover,
+                  product_img,
+                  product_unit,
+                  GET_SELL_PRICE(se.product_code,'{$pcomp_id}','{$usd_ratio}') product_price_total,
+                  GET_PRICE(se.product_code,'{$pcomp_id}','{$usd_ratio}') product_price_total_raw,
+                  pp.curr_code,
+                  se.party_label,
+                  se.product_quantity,
+                  se.product_img
+              FROM
+                  stock_entries se
+                      JOIN
+                  prod_list pl ON pl.product_code=se.product_code
+                      LEFT JOIN
+                  price_list pp ON pp.product_code=se.product_code AND pp.label=''
+                      LEFT JOIN
+                  stock_tree st ON se.parent_id=branch_id
+              WHERE 
+                  se.product_code='{$product_code}'";
         $product_data = $this->get_row($sql);
         return $product_data;
-    }
+    }*/
+    
     public $userPropsGet=[];
     public function userPropsGet(){
         $props=$this->Hub->load_model('User')->userFetch();

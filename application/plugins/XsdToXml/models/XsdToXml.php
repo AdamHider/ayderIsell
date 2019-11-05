@@ -437,6 +437,3 @@ class XsdToXml extends Catalog {
         return json_decode($row->plugin_settings);
     }
 }
-
-
-INSERT INTO `isell_db`.`document_view_types` (`doc_types`, `blank_set`, `view_name`, `view_role`, `view_tpl`) VALUES ('/1/3/', 'ru', 'Счет фактура', 'tax_bill', 'ru/doc/schet-faktura.xsd');
