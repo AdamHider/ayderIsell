@@ -226,6 +226,9 @@ class Utils extends Catalog {
             $this->Hub->svar('smsSessionId', $sid);
             $this->Hub->svar('smsSessionTime', time());
         }
+        
+        
+        
         $post_vars = array(
             'SessionID' => $this->Hub->svar('smsSessionId'),
             'SourceAddress' => $this->Hub->pref('SMS_SENDER'),
@@ -240,6 +243,10 @@ class Utils extends Catalog {
             ]
         );
         $response = file_get_contents('https://integrationapi.net/rest/Sms/SendBulk/', false, stream_context_create($opts));
+        
+        
+        
+        
         $msg_ids = json_decode($response);
         if (!$msg_ids[0]) {
             $this->Hub->msg('Sending SMS is failed');
